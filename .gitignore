@@ -1,0 +1,47 @@
+# ==========================
+# GLOBAL
+# ==========================
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+__pycache__/
+*.log
+
+# ==========================
+# PYTHON
+# ==========================
+venv/
+env/
+ENV/
+*.pyc
+*.pyo
+*.pyd
+.Python
+python_env/
+
+# Sensitive files
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ==========================
+# REACT (frontend/)
+# ==========================
+frontend/node_modules/
+frontend/build/
+frontend/.env
+frontend/.env.*
+
+# React editor junk
+frontend/.DS_Store
+frontend/.vscode/
+
+# ==========================
+# OTHER
+# ==========================
+*.swp
+*.swo
