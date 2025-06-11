@@ -1,7 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+import traceback
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from utils.file_extractor import extract_zip, is_code_file, is_valid_code_file
 from utils.constants import JUNK_FOLDERS
 import os
+import json
 import uuid
 import shutil
 from services.project_summary import get_project_summary, parse_project_summary
@@ -11,35 +13,41 @@ from dotenv import load_dotenv
 from services.parser import parse_outputs
 from db.models import save_to_mongo
 from routes.progress_ws import connected_websockets
-
+from fastapi import Request
+from utils.auth_utils import get_current_user_data
 load_dotenv()
-
 router = APIRouter()
-
 TEMP_FOLDER = "temp_uploads"
 
-# Helper function to send progress to all connected WebSocket clients
+
 async def send_progress(message: str, progress: int = None):
     for ws in connected_websockets:
         try:
-            payload = { "status": message }
+            payload = {"status": message}
             if progress is not None:
                 payload["progress"] = progress
             await ws.send_json(payload)
         except:
-            pass  # Ignore if client disconnected
-
+            pass
 @router.post("/")
-async def upload_project(files: list[UploadFile] = File(...)):
+async def upload_project(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    user_data: dict = Depends(get_current_user_data)
+):
     try:
-        os.makedirs(TEMP_FOLDER, exist_ok=True)
+        # ✅ Now safe — requires token!
+        user_id = user_data["user_id"]
+        project_id = user_data["project_id"]
 
+        # === Main logic ===
+        os.makedirs(TEMP_FOLDER, exist_ok=True)
+        upload_id = str(uuid.uuid4())
         all_code_files = []
         zip_extract_paths = []
+        normal_file_paths = []
+        file_previews = []
 
-        file_previews = []  # NEW → for Project Summary
-
-        # Process uploads
         for uploaded_file in files:
             file_id = str(uuid.uuid4())
 
@@ -54,17 +62,17 @@ async def upload_project(files: list[UploadFile] = File(...)):
 
                 for root, dirs, files_in_zip in os.walk(extract_path):
                     dirs[:] = [d for d in dirs if d not in JUNK_FOLDERS]
-
                     for file_in_zip in files_in_zip:
                         file_full_path = os.path.join(root, file_in_zip)
                         if is_code_file(file_full_path) and is_valid_code_file(file_full_path):
                             all_code_files.append(file_full_path)
-
-                            # Build preview
                             with open(file_full_path, "r", encoding="utf-8", errors="ignore") as f:
                                 content = f.read(500)
+                            relative_name = os.path.relpath(file_full_path, start=TEMP_FOLDER).replace("\\", "/")
                             file_previews.append({
                                 "filename": file_full_path,
+                                "display_name": relative_name,
+                                "original_name": file_in_zip,
                                 "preview": content
                             })
 
@@ -72,118 +80,208 @@ async def upload_project(files: list[UploadFile] = File(...)):
                 os.remove(zip_temp_path)
 
             else:
-                # Normal file → read in memory → no disk save
-                content_bytes = await uploaded_file.read()
-                content_text = content_bytes.decode("utf-8", errors="ignore")
-                file_lines = content_text.splitlines()
+                normal_file_path = os.path.join(TEMP_FOLDER, f"{file_id}_{uploaded_file.filename}")
+                with open(normal_file_path, "wb") as f:
+                    content_bytes = await uploaded_file.read()
+                    f.write(content_bytes)
 
-                if is_code_file(uploaded_file.filename):
-                    all_code_files.append((uploaded_file.filename, file_lines))
+                normal_file_paths.append(normal_file_path)
 
-                    # Build preview
+                with open(normal_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content_text = f.read()
+                    file_lines = content_text.splitlines()
+
+                if is_code_file(normal_file_path):
+                    all_code_files.append(normal_file_path)
+                    relative_name = os.path.relpath(normal_file_path, start=TEMP_FOLDER).replace("\\", "/")
                     preview_text = content_text[:500]
                     file_previews.append({
-                        "filename": uploaded_file.filename,
+                        "filename": normal_file_path,
+                        "display_name": relative_name,
+                        "original_name": uploaded_file.filename,
                         "preview": preview_text
                     })
 
-        # Progress → Upload complete
         await send_progress("Upload complete ✅", progress=5)
-
-        # ✅ Project Summary → now pass file_previews
         await send_progress("Running Project Summary...", progress=10)
 
-        summary_text = await get_project_summary(file_previews)  # CHANGE HERE → passing previews!
+        summary_text = await get_project_summary(file_previews)
         dependencies, connected_groups = parse_project_summary(summary_text)
 
-        if not connected_groups:
-            connected_groups = [[file] for file in all_code_files]
+        display_name_to_full_path = {
+            file_obj["display_name"]: file_obj["filename"]
+            for file_obj in file_previews
+        }
 
-        await send_progress(f"Connected Groups ready — {len(connected_groups)} groups", progress=15)
-
-        # Analyze Groups
-        tasks = []
-
+        connected_groups_full_paths = []
         for group in connected_groups:
-            file_chunks = []
-
-            for file_entry in group:
-                if isinstance(file_entry, tuple):
-                    file_name, file_lines = file_entry
+            group_full_paths = []
+            for display_name in group:
+                full_path = display_name_to_full_path.get(display_name)
+                if full_path:
+                    group_full_paths.append(full_path)
                 else:
-                    file_name = file_entry
-                    with open(file_name, "r", encoding="utf-8") as f:
-                        file_lines = f.readlines()
+                    print(f"[WARNING] No matching full path for: {display_name}")
+            connected_groups_full_paths.append(group_full_paths)
 
-                MAX_LINES_PER_CHUNK = 500
-                num_chunks = (len(file_lines) + MAX_LINES_PER_CHUNK - 1) // MAX_LINES_PER_CHUNK
+        await send_progress(f"Connected Groups ready — {len(connected_groups_full_paths)} groups", progress=15)
 
-                for chunk_index in range(num_chunks):
-                    start_line = chunk_index * MAX_LINES_PER_CHUNK
-                    end_line = min(start_line + MAX_LINES_PER_CHUNK, len(file_lines))
-                    chunk_lines = file_lines[start_line:end_line]
-
-                    file_chunks.append((file_name, chunk_lines))
-
-            task = call_gpt_analyze_chunk(file_chunks)
-            tasks.append(task)
-
-        # Run all analyze tasks
-        gpt_results_raw = await asyncio.gather(*tasks)
-
-        gpt_results = []
-
-        total_groups = len(connected_groups)
-
-        for i, group in enumerate(connected_groups):
-            group_progress = 15 + int((i / total_groups) * 70)
-            await send_progress(f"Analyzing Group {i+1}/{total_groups}...", progress=group_progress)
-
-            analysis_output = gpt_results_raw[i]
-
-            # Sanity check step
-            bug_lines = []
-            for line in analysis_output.splitlines():
-                line = line.strip()
-                if line.startswith("- BUG "):
-                    bug_lines.append(line)
-
-            bug_list_text = "\n".join(bug_lines)
-
-            await send_progress(f"Running Sanity Check on Group {i+1}/{total_groups}...", progress=group_progress + 5)
-
-            sanity_checked_output = await run_sanity_check_on_bugs(group[0], bug_list_text)
-
-            gpt_results.append({
-                "files": group,
-                "analysis_output": analysis_output,
-                "sanity_checked_output": sanity_checked_output
-            })
-
-            # Save to Mongo
-            await send_progress(f"Saving Group {i+1} to MongoDB...", progress=group_progress + 10)
-
-            for file_in_group in group:
-                if isinstance(file_in_group, tuple):
-                    file_name = file_in_group[0]
-                else:
-                    file_name = file_in_group
-
-                parsed_data = parse_outputs(analysis_output, sanity_checked_output)
-                save_to_mongo(file_name, parsed_data)
-
-        # Cleanup
-        for extract_path in zip_extract_paths:
-            if os.path.exists(extract_path):
-                shutil.rmtree(extract_path)
-
-        await send_progress("DONE 🚀", progress=100)
+        # ✅ Pass user_id and project_id — required for correct save
+        asyncio.create_task(run_analysis_task(
+            upload_id,
+            connected_groups_full_paths,
+            zip_extract_paths + normal_file_paths,
+            file_previews,
+            user_id,
+            project_id
+        ))
 
         return {
-            "message": "Analysis complete!",
-            "files_analyzed": len(gpt_results),
-            "results": gpt_results
+            "message": "Upload started",
+            "upload_id": upload_id,
+            "groups": len(connected_groups_full_paths),
+            "files": [f for group in connected_groups for f in group]
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_analysis_task(upload_id, connected_groups, extract_paths, file_previews, user_id, project_id):
+    try:
+        gpt_results = []
+        tasks = []
+
+        # Build full_path_to_original_name mapping once
+        full_path_to_original_name = {
+            file_obj["filename"]: file_obj.get("original_name", "")
+            for file_obj in file_previews
+        }
+
+        for i, group in enumerate(connected_groups):
+            tasks.append(
+                analyze_one_group(
+                            upload_id,
+                            group,
+                            i,
+                            len(connected_groups),
+                            gpt_results,
+                            full_path_to_original_name,
+                            user_id,
+                            project_id
+                        )
+                    )
+
+        await asyncio.gather(*tasks)
+
+        # Clean up extracted files
+        for path in extract_paths:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            elif os.path.isfile(path):
+                os.remove(path)
+
+        if os.path.exists(TEMP_FOLDER) and not os.listdir(TEMP_FOLDER):
+            shutil.rmtree(TEMP_FOLDER)
+
+        await send_progress("DONE 🚀", progress=100)
+
+    except Exception as e:
+        traceback.print_exc()
+
+
+
+async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_results, full_path_to_original_name, user_id, project_id):
+
+    try:
+        group_progress = 15 + int((group_index / total_groups) * 70)
+        await send_progress(f"Analyzing Group {group_index + 1}/{total_groups}...", progress=group_progress)
+
+        file_chunks = []
+        for file_entry in group:
+            if isinstance(file_entry, tuple):
+                file_name, file_lines = file_entry
+            else:
+                file_name = file_entry
+                with open(file_name, "r", encoding="utf-8") as f:
+                    file_lines = f.readlines()
+
+            total_lines = len(file_lines)
+
+            # Dynamically adjust chunk size
+            if total_lines <= 300:
+                MAX_LINES_PER_CHUNK = total_lines
+            elif total_lines <= 2000:
+                MAX_LINES_PER_CHUNK = 400
+            else:
+                MAX_LINES_PER_CHUNK = 400
+
+            num_chunks = (total_lines + MAX_LINES_PER_CHUNK - 1) // MAX_LINES_PER_CHUNK
+
+            for chunk_index in range(num_chunks):
+                start_line = chunk_index * MAX_LINES_PER_CHUNK
+                end_line = min(start_line + MAX_LINES_PER_CHUNK, total_lines)
+                chunk_lines = file_lines[start_line:end_line]
+                file_chunks.append((file_name, chunk_lines))
+
+        # Run GPT analysis
+        analysis_output = await call_gpt_analyze_chunk(file_chunks)
+
+        # Parse analysis_output as JSON (safe way)
+        try:
+            # Clean up possible GPT wrapping:
+            if analysis_output.strip().startswith("```json"):
+                analysis_output = analysis_output.strip().split("```json")[1].split("```")[0].strip()
+            elif analysis_output.strip().startswith("```"):
+                analysis_output = analysis_output.strip().split("```")[1].split("```")[0].strip()
+
+            analysis_data = json.loads(analysis_output)
+        except Exception as e:
+            print(f"[Parse Error] Could not parse GPT analysis output JSON: {e}")
+            analysis_data = { "bugs": [], "optimizations": [] }
+
+        # Build bug_list_text for sanity check (NOW pass correct JSON string)
+        bugs_json_string = json.dumps(analysis_data.get("bugs", []), indent=2)
+
+        await send_progress(f"Running Sanity Check on Group {group_index + 1}/{total_groups}...", progress=group_progress + 5)
+
+        sanity_checked_output = await run_sanity_check_on_bugs(group[0], bugs_json_string)
+
+        # Sanity check parse
+        try:
+            if sanity_checked_output.strip().startswith("```json"):
+                sanity_checked_output = sanity_checked_output.strip().split("```json")[1].split("```")[0].strip()
+            elif sanity_checked_output.strip().startswith("```"):
+                sanity_checked_output = sanity_checked_output.strip().split("```")[1].split("```")[0].strip()
+
+            sanity_checked_data = json.loads(sanity_checked_output)
+        except Exception as e:
+            print(f"[Parse Error] Could not parse Sanity Check output JSON: {e}")
+            sanity_checked_data = { "bugs": [] }
+
+        # Store results
+        gpt_results.append({
+            "files": group,
+            "analysis_output": analysis_data,
+            "sanity_checked_output": sanity_checked_data
+        })
+
+        await send_progress(f"Saving Group {group_index + 1} to MongoDB...", progress=group_progress + 10)
+
+        for file_in_group in group:
+            if isinstance(file_in_group, tuple):
+                file_name = file_in_group[0]
+            else:
+                file_name = file_in_group
+
+            relative_file_name = os.path.relpath(file_name, start=TEMP_FOLDER).replace("\\", "/")
+            original_name = full_path_to_original_name.get(file_name, "")
+
+            parsed_data = parse_outputs(analysis_data, sanity_checked_data)
+            save_to_mongo(upload_id, relative_file_name, parsed_data, user_id, project_id, original_name)
+
+
+        await asyncio.sleep(0.2)
+
+    except Exception as e:
+        traceback.print_exc()

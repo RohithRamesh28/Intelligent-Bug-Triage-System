@@ -2,24 +2,22 @@ import openai
 import os
 import asyncio
 from dotenv import load_dotenv
+import json
 load_dotenv()
 
-
-# Create OpenAI client (new API style)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 1️⃣ GPT call wrapper for single chunk (single file or multi-file chunk)
+# 1️⃣ GPT call wrapper for multi-file chunk
 async def call_gpt_analyze_chunk(file_chunks):
-    # Build message content
-    chunk_message = ""
+    chunk_message_parts = []
 
     for file_name, chunk_lines in file_chunks:
         chunk_text = "".join(chunk_lines)
+        part = f"---\nFilename: {file_name}\nChunk:\n```\n{chunk_text}\n```\n---\n"
+        chunk_message_parts.append(part)
 
-        # Count chunks → if your chunking supports it (for now assume 1 chunk per file here)
-        chunk_message += f"---\nFilename: {file_name}\nChunk:\n```\n{chunk_text}\n```\n---\n"
+    chunk_message = "".join(chunk_message_parts).replace("{", "{{").replace("}", "}}")
 
-    # Build messages
     messages = [
         {
             "role": "system",
@@ -29,43 +27,26 @@ async def call_gpt_analyze_chunk(file_chunks):
             "role": "user",
             "content": f"""
 You are analyzing the following files from a software project.
-You will be given the full content of each file, divided into chunks.
+Each file is divided into clearly labeled chunks.
 
-Your goal is to perform a deep analysis of this code.
-For each file, carefully analyze the logic, structure, and style.
-Then generate the following output:
+For each BUG:
+- Line number (approximate is fine)
+- Priority: High / Medium / Low
+- Confidence: High / Medium / Low
+- Description
 
-1️⃣ BUGS
-- Identify real bugs in the code.
-- Include logic errors, missing edge cases, incorrect usage of APIs, security vulnerabilities, etc.
-- Do not report trivial style issues unless they cause bugs.
+For each OPTIMIZATION:
+- Line number (or 0 / -1 if not applicable)
+- Description
 
-2️⃣ OPTIMIZATIONS
-- Suggest meaningful optimizations.
-- Include performance improvements, code clarity improvements, reducing duplication, better patterns, etc.
+⚠️ Return ONLY valid JSON:
+{{
+  "bugs": [{{"line": ..., "priority": "...", "confidence": "...", "description": "..."}}],
+  "optimizations": [{{"line": ..., "description": "..."}}]
+}}
 
-Important Guidelines:
-- You are analyzing full content — think deeply.
-- Avoid shallow comments (do not say "remove unused import").
-- For each BUG, give:
-    - Line number (approximate is fine)
-    - Short description (1-2 lines)
-    - Priority: High / Medium / Low
-    - Confidence: High / Medium / Low
-
-- For each OPTIMIZATION, give:
-    - Line number (if applicable, else "N/A")
-    - Short description (1-2 lines)
-
-Output Format (strict):
-
-- BUG line X → Priority: High → Confidence: Medium → Description: ...
-- BUG line Y → Priority: Low → Confidence: High → Description: ...
-...
-- OPTIMIZATION line X → Description: ...
-- OPTIMIZATION line N/A → Description: ...
-
-Do not output explanations. Only output the list in the format above.
+If no bugs/optimizations:
+{{"bugs": [], "optimizations": []}}
 
 Now here are the files:
 
@@ -74,7 +55,6 @@ Now here are the files:
         }
     ]
 
-    # Call GPT → in thread so your main async loop is not blocked
     response = await asyncio.to_thread(
         client.chat.completions.create,
         model="gpt-4o",
@@ -84,37 +64,63 @@ Now here are the files:
     )
 
     content = response.choices[0].message.content
+    print("\n===== GPT Analyze Chunk Output =====")
+    print(content)
+    print("====================================\n")
 
     return content
-# 2️⃣ Sanity Check step → review bug list and correct
-async def run_sanity_check_on_bugs(file_name, bug_list_text):
+
+# 2️⃣ Sanity check
+# 2️⃣ Sanity check → fixed to return JSON
+
+
+
+
+async def run_sanity_check_on_bugs(file_name, bug_list_text_json):
     messages = [
-        {"role": "system", "content": """
+        {
+            "role": "system",
+            "content": """
 You are a professional code reviewer.
 
-You will now review a list of bugs previously detected.
+You will receive a list of BUGS in JSON format.
 
-Your task is:
+Your task:
+- REMOVE false positives.
+- ADD missing critical bugs if any.
+- FIX incorrect line numbers if needed.
+- DO NOT include cosmetic or style-only issues.
+- DO NOT erase valid bugs unless clearly wrong.
 
-- Identify and REMOVE false positives — bugs that are not valid.
-- Identify and ADD any clearly MISSING critical bugs.
-- Correct line numbers if needed.
-- DO NOT add cosmetic or style suggestions — focus only on real bugs.
-- Return the corrected bug list in this format:
+You MUST return a clean JSON object in the following format:
 
-FILE: <file name>
-- BUG [Priority: ...] [Confidence: ...] at line ...: Description
-"""},
+{
+  "bugs": [
+    { "line": ..., "priority": "...", "confidence": "...", "description": "..." }
+  ]
+}
 
-        {"role": "user", "content": f"""
-Here is the list of bugs detected for file {file_name}:
+If no bugs remain:
 
-{bug_list_text}
+{
+  "bugs": []
+}
 
-Do you see any false positives or missing critical bugs?
-Please CORRECT and return the bug list in correct format.
-Do NOT repeat optimizations here — just BUGS.
-"""}
+Do NOT return any explanation or extra text. Only return the clean JSON.
+"""
+        },
+        {
+            "role": "user",
+            "content": f"""
+You are reviewing file: {file_name}
+
+Here is the detected bug list (JSON format):
+
+{bug_list_text_json}
+
+Please return the corrected list, as valid JSON only.
+"""
+        }
     ]
 
     response = await asyncio.to_thread(
@@ -127,47 +133,80 @@ Do NOT repeat optimizations here — just BUGS.
 
     content = response.choices[0].message.content
 
+    # 🛠️ Clean possible junk / code block markers from GPT response
+    if content.strip().startswith("```json"):
+        content = content.strip().split("```json")[1].split("```")[0].strip()
+    elif content.strip().startswith("```"):
+        content = content.strip().split("```")[1].split("```")[0].strip()
+
+    print("\n===== GPT Sanity Check Output =====")
+    print(content)
+    print("==================================\n")
+
     return content
 
-# 3️⃣ GPT call wrapper for single file chunk (for existing analyze_file_async)
+
+
+# 3️⃣ GPT call wrapper for single file analysis
 async def call_gpt_async(code_chunk, file_path):
+    code_chunk_safe = code_chunk.replace("{", "{{").replace("}", "}}")
+
     messages = [
-        {"role": "system", "content": "You are a professional code reviewer. Analyze code, find bugs, and suggest optimizations."},
-        {"role": "user", "content": f"Analyze the following code from {file_path}:\n\n{code_chunk}"}
+        {
+            "role": "system",
+            "content": "You are a professional software engineer and expert code reviewer."
+        },
+        {
+            "role": "user",
+            "content": f"""
+You are analyzing the following code from a single file: {file_path}
+
+Return ONLY valid JSON:
+{{
+  "bugs": [{{"line": ..., "priority": "...", "confidence": "...", "description": "..."}}],
+  "optimizations": [{{"line": ..., "description": "..."}}]
+}}
+
+If no bugs/optimizations:
+{{"bugs": [], "optimizations": []}}
+
+Here is the file content:
+
+{code_chunk_safe}
+"""
+        }
     ]
 
     response = await asyncio.to_thread(
         client.chat.completions.create,
         model="gpt-4o",
         messages=messages,
-        max_tokens=2048,
+        max_tokens=4096,
         temperature=0
     )
 
     content = response.choices[0].message.content
+    print("\n===== GPT Single File Analyze Output =====")
+    print(content)
+    print("=========================================")
 
     return content
 
-# 4️⃣ Analyze single file async (compatible with your existing code)
+# 4️⃣ Analyze single file async
 async def analyze_file_async(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             code = f.read()
 
-        # TODO: Later → chunk large files → for now, one chunk per file
-        chunks = [code]
-
-        results = []
-        for chunk in chunks:
-            analysis_content = await call_gpt_async(chunk, file_path)
-            results.append({
-                "chunk": chunk[:100] + "..." if len(chunk) > 100 else chunk,  # show preview in result
-                "analysis": analysis_content
-            })
+        # For now, treat entire file as one chunk
+        analysis_content = await call_gpt_async(code, file_path)
 
         return {
             "file_path": file_path,
-            "analysis_results": results
+            "analysis_results": [{
+                "chunk": code[:100] + "..." if len(code) > 100 else code,
+                "analysis": analysis_content
+            }]
         }
 
     except Exception as e:
