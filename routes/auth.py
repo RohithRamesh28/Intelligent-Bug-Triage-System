@@ -83,6 +83,7 @@ def login_user(data: LoginRequest):
     user_id = user["_id"]
 
     # Create JWT token
-    token = create_jwt_token(str(user_id), str(project_id))
+    token = create_jwt_token(str(user_id), str(project_id), user["username"])
+
 
     return {"token": token, "user_id": str(user_id), "project_id": str(project_id)}

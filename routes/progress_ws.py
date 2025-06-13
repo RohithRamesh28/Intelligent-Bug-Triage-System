@@ -1,31 +1,28 @@
 # routes/progress_ws.py
-
-import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import asyncio
 
 router = APIRouter()
 
-# Simple list to track connected clients
-connected_websockets = []
+# Dict: upload_id → list of websockets
+connected_websockets = {}
 
-
-@router.websocket("/ws/progress")
-async def websocket_endpoint(websocket: WebSocket):
+@router.websocket("/ws/progress/{upload_id}")
+async def websocket_endpoint(websocket: WebSocket, upload_id: str):
     await websocket.accept()
-    print(f"[WebSocket] Client connected")
+    if upload_id not in connected_websockets:
+        connected_websockets[upload_id] = []
+    connected_websockets[upload_id].append(websocket)
+    print(f"[WebSocket] Client connected for upload_id={upload_id} — total: {len(connected_websockets[upload_id])}")
 
     try:
-        # Simulate sending progress updates
-        for i in range(0, 101, 10):
-            await websocket.send_json({
-                "progress": i,
-                "status": f"Processing... {i}%",
-            })
-            await asyncio.sleep(0.5)  # Simulate work
-        await websocket.send_json({
-            "progress": 100,
-            "status": "DONE 🚀",
-        })
-        await websocket.close()
-    except WebSocketDisconnect:
-        print(f"[WebSocket] Client disconnected")
+        while True:
+            # Keep WebSocket alive
+            await asyncio.sleep(1)
+    except WebSocketDisconnect: 
+        connected_websockets[upload_id].remove(websocket)
+        print(f"[WebSocket] Client disconnected for upload_id={upload_id} — remaining: {len(connected_websockets[upload_id])}")
+        
+        # Cleanup empty list
+        if len(connected_websockets[upload_id]) == 0:
+            del connected_websockets[upload_id]

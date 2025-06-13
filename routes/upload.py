@@ -1,5 +1,5 @@
 import traceback
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Form
 from utils.file_extractor import extract_zip, is_code_file, is_valid_code_file
 from utils.constants import JUNK_FOLDERS
 import os
@@ -19,19 +19,36 @@ load_dotenv()
 router = APIRouter()
 TEMP_FOLDER = "temp_uploads"
 
+from routes.progress_ws import connected_websockets
 
-async def send_progress(message: str, progress: int = None):
-    for ws in connected_websockets:
+async def send_progress(upload_id: str, message: str, progress: int = None):
+    if upload_id not in connected_websockets:
+        print(f"[WebSocket] No active clients for upload_id={upload_id}")
+        return
+    
+    disconnected_clients = []
+    for ws in connected_websockets[upload_id]:
         try:
             payload = {"status": message}
             if progress is not None:
                 payload["progress"] = progress
             await ws.send_json(payload)
         except:
-            pass
+            disconnected_clients.append(ws)
+    
+    # Cleanup disconnected
+    for ws in disconnected_clients:
+        connected_websockets[upload_id].remove(ws)
+    
+    # If no clients left, clean up
+    if len(connected_websockets[upload_id]) == 0:
+        del connected_websockets[upload_id]
+
+
 @router.post("/")
 async def upload_project(
     request: Request,
+    upload_description: str = Form(""),  # NEW → take from frontend
     files: list[UploadFile] = File(...),
     user_data: dict = Depends(get_current_user_data)
 ):
@@ -39,6 +56,7 @@ async def upload_project(
         # ✅ Now safe — requires token!
         user_id = user_data["user_id"]
         project_id = user_data["project_id"]
+        username = user_data["username"]  # NEW → get username for Mongo
 
         # === Main logic ===
         os.makedirs(TEMP_FOLDER, exist_ok=True)
@@ -102,8 +120,8 @@ async def upload_project(
                         "preview": preview_text
                     })
 
-        await send_progress("Upload complete ✅", progress=5)
-        await send_progress("Running Project Summary...", progress=10)
+        await send_progress(upload_id, "Upload complete ✅", progress=5)
+        await send_progress(upload_id, "Running Project Summary...", progress=10)
 
         summary_text = await get_project_summary(file_previews)
         dependencies, connected_groups = parse_project_summary(summary_text)
@@ -123,17 +141,18 @@ async def upload_project(
                 else:
                     print(f"[WARNING] No matching full path for: {display_name}")
             connected_groups_full_paths.append(group_full_paths)
+        await send_progress(upload_id, f"Connected Groups ready — {len(connected_groups_full_paths)} groups", progress=15)
 
-        await send_progress(f"Connected Groups ready — {len(connected_groups_full_paths)} groups", progress=15)
-
-        # ✅ Pass user_id and project_id — required for correct save
+        # ✅ Pass user_id, username, project_id, upload_description — required for correct save
         asyncio.create_task(run_analysis_task(
             upload_id,
             connected_groups_full_paths,
             zip_extract_paths + normal_file_paths,
             file_previews,
             user_id,
-            project_id
+            username,
+            project_id,
+            upload_description
         ))
 
         return {
@@ -146,8 +165,7 @@ async def upload_project(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-async def run_analysis_task(upload_id, connected_groups, extract_paths, file_previews, user_id, project_id):
+async def run_analysis_task(upload_id, connected_groups, extract_paths, file_previews, user_id, username, project_id, upload_description):
     try:
         gpt_results = []
         tasks = []
@@ -161,16 +179,18 @@ async def run_analysis_task(upload_id, connected_groups, extract_paths, file_pre
         for i, group in enumerate(connected_groups):
             tasks.append(
                 analyze_one_group(
-                            upload_id,
-                            group,
-                            i,
-                            len(connected_groups),
-                            gpt_results,
-                            full_path_to_original_name,
-                            user_id,
-                            project_id
-                        )
-                    )
+                    upload_id,
+                    group,
+                    i,
+                    len(connected_groups),
+                    gpt_results,
+                    full_path_to_original_name,
+                    user_id,
+                    username,
+                    project_id,
+                    upload_description
+                )
+            )
 
         await asyncio.gather(*tasks)
 
@@ -184,18 +204,15 @@ async def run_analysis_task(upload_id, connected_groups, extract_paths, file_pre
         if os.path.exists(TEMP_FOLDER) and not os.listdir(TEMP_FOLDER):
             shutil.rmtree(TEMP_FOLDER)
 
-        await send_progress("DONE 🚀", progress=100)
+        await send_progress(upload_id, "DONE 🚀", progress=100)
 
     except Exception as e:
         traceback.print_exc()
 
-
-
-async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_results, full_path_to_original_name, user_id, project_id):
-
+async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_results, full_path_to_original_name, user_id, username, project_id, upload_description):
     try:
         group_progress = 15 + int((group_index / total_groups) * 70)
-        await send_progress(f"Analyzing Group {group_index + 1}/{total_groups}...", progress=group_progress)
+        await send_progress(upload_id, f"Analyzing Group {group_index + 1}/{total_groups}...", progress=group_progress)
 
         file_chunks = []
         for file_entry in group:
@@ -240,10 +257,10 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             print(f"[Parse Error] Could not parse GPT analysis output JSON: {e}")
             analysis_data = { "bugs": [], "optimizations": [] }
 
-        # Build bug_list_text for sanity check (NOW pass correct JSON string)
+        # Build bug_list_text for sanity check
         bugs_json_string = json.dumps(analysis_data.get("bugs", []), indent=2)
 
-        await send_progress(f"Running Sanity Check on Group {group_index + 1}/{total_groups}...", progress=group_progress + 5)
+        await send_progress(upload_id, f"Running Sanity Check on Group {group_index + 1}/{total_groups}...", progress=group_progress + 5)
 
         sanity_checked_output = await run_sanity_check_on_bugs(group[0], bugs_json_string)
 
@@ -266,7 +283,7 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             "sanity_checked_output": sanity_checked_data
         })
 
-        await send_progress(f"Saving Group {group_index + 1} to MongoDB...", progress=group_progress + 10)
+        await send_progress(upload_id, f"Saving Group {group_index + 1} to MongoDB...", progress=group_progress + 10)
 
         for file_in_group in group:
             if isinstance(file_in_group, tuple):
@@ -278,8 +295,7 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             original_name = full_path_to_original_name.get(file_name, "")
 
             parsed_data = parse_outputs(analysis_data, sanity_checked_data)
-            save_to_mongo(upload_id, relative_file_name, parsed_data, user_id, project_id, original_name)
-
+            save_to_mongo(upload_id, relative_file_name, parsed_data, user_id, username, project_id, original_name, upload_description)
 
         await asyncio.sleep(0.2)
 

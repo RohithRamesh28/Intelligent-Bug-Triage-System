@@ -23,11 +23,13 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 # === JWT Token handling ===
 
-def create_jwt_token(user_id: str, project_id: str) -> str:
+def create_jwt_token(user_id: str, project_id: str ,username: str) -> str:
     payload = {
         "user_id": user_id,
         "project_id": project_id,
+        "username": username,
         "exp": datetime.utcnow() + timedelta(minutes=JWT_EXP_DELTA_MINUTES)
+        
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token
@@ -42,11 +44,6 @@ def decode_jwt_token(token: str) -> dict:
         raise Exception("Invalid token")
 
 
-
-
-
-
-# FastAPI built-in HTTPBearer
 bearer_scheme = HTTPBearer()
 
 def get_current_user_data(credentials: HTTPAuthorizationCredentials = Security(bearer_scheme)):
@@ -55,7 +52,8 @@ def get_current_user_data(credentials: HTTPAuthorizationCredentials = Security(b
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return {
             "user_id": payload["user_id"],
-            "project_id": payload["project_id"]
+            "project_id": payload["project_id"],
+            "username": payload.get("username", "Unknown")
         }
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

@@ -27,7 +27,8 @@ projects_collection.create_index(
 
 # === Save Upload function ===
 
-def save_to_mongo(upload_id, file_name, parsed_data, user_id, project_id, original_name=None):
+def save_to_mongo(upload_id, file_name, parsed_data, user_id, username, project_id, original_name=None, upload_description=""):
+
     doc = {
         "upload_id": upload_id,
         "file": file_name,
@@ -36,10 +37,13 @@ def save_to_mongo(upload_id, file_name, parsed_data, user_id, project_id, origin
         "bugs_sanity_checked": parsed_data["bugs_sanity_checked"],
         "optimizations_original": parsed_data["optimizations_original"],
         "optimizations_sanity_checked": parsed_data["optimizations_sanity_checked"],
-        "user_id": ObjectId(user_id),        # new → saves user_id
-        "project_id": ObjectId(project_id),  # new → saves project_id
+        "user_id": ObjectId(user_id),
+        "username": username,  # NEW
+        "project_id": ObjectId(project_id),
+        "upload_description": upload_description,  # NEW
         "timestamp": datetime.now(timezone.utc)
     }
+
 
     file_analysis_collection.update_one(
         {"upload_id": upload_id, "file": file_name},

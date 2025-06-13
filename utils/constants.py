@@ -10,8 +10,8 @@ JUNK_FOLDERS = {
     ".idea",
     ".vscode",
     "build",
-    "target"
-    "eslint.config.js"
+    "target",
+    "eslint.config.js",
     "vite.config.js"
 }
 

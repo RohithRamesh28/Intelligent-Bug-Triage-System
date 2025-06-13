@@ -6,13 +6,10 @@ from dotenv import load_dotenv
 import os
 from routes import auth
 from routes import project
+from routes import me
 
-
-
-# ✅ Load environment variables from .env
 load_dotenv()
 
-# ✅ Initialize FastAPI app
 app = FastAPI(
     title="Intelligent Bug Triage System",
     version="1.0.0"
@@ -33,6 +30,7 @@ app.include_router(progress_ws.router, tags=["WebSocket"])
 app.include_router(file_bugs.router, tags=["File Bugs"])
 app.include_router(auth.router, tags=["Auth"])
 app.include_router(project.router, tags=["Project"])
+app.include_router(me.router, tags=["Me"])
 
 
 # ✅ Optional root route — for testing

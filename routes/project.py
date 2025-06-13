@@ -1,13 +1,13 @@
 # routes/project.py
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from db.models import projects_collection
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from utils.auth_utils import get_current_user_data
-from db.models import file_analysis_collection
 from bson import ObjectId
+from db.models import file_analysis_collection
+
 
 router = APIRouter()
 
@@ -61,21 +61,42 @@ def create_project(data: CreateProjectRequest):
 def project_dashboard(user_data: dict = Depends(get_current_user_data)):
     project_id = ObjectId(user_data["project_id"])
 
-    uploads_cursor = file_analysis_collection.find({"project_id": project_id})
+    # Get distinct upload_ids for this project
+    upload_ids = file_analysis_collection.distinct("upload_id", {"project_id": project_id})
+
     uploads = []
-    for upload in uploads_cursor:
+    for upload_id in upload_ids:
+        # Find one document for this upload_id to get metadata
+        first_doc = file_analysis_collection.find_one({"upload_id": upload_id})
+
+        # Count how many documents (files) for this upload_id
+        num_files = file_analysis_collection.count_documents({"upload_id": upload_id})
+
+        # Get all bugs_sanity_checked from all documents of this upload_id
+        all_docs = file_analysis_collection.find({"upload_id": upload_id})
+
+        bugs_sanity_checked = []
+        for doc in all_docs:
+            bugs_sanity_checked.extend(doc.get("bugs_sanity_checked", []))
+
         uploads.append({
-            "upload_id": upload.get("upload_id"),
-            "file": upload.get("file"),
-            "original_filename": upload.get("original_filename"),
-            "bugs_original": upload.get("bugs_original"),
-            "bugs_sanity_checked": upload.get("bugs_sanity_checked"),
-            "optimizations_original": upload.get("optimizations_original"),
-            "optimizations_sanity_checked": upload.get("optimizations_sanity_checked"),
-            "timestamp": upload.get("timestamp")
+            "upload_id": upload_id,
+            "upload_description": first_doc.get("upload_description"),
+            "original_filename": first_doc.get("original_filename"),
+            "user_id": str(first_doc.get("user_id")),
+            "username": first_doc.get("username"),
+            "timestamp": first_doc.get("timestamp"),
+            "num_files": num_files,
+            "bugs_sanity_checked": bugs_sanity_checked  # now full list of bugs
         })
 
-    return {"project_id": user_data["project_id"], "uploads": uploads}
+    # Sort uploads by timestamp descending
+    uploads.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    return {"project_id": str(user_data["project_id"]), "uploads": uploads}
+
+
+
 
 # === Personal Upload History ===
 
@@ -84,25 +105,125 @@ def my_uploads(user_data: dict = Depends(get_current_user_data)):
     project_id = ObjectId(user_data["project_id"])
     user_id = ObjectId(user_data["user_id"])
 
-    uploads_cursor = file_analysis_collection.find({
-        "project_id": project_id,
-        "user_id": user_id
-    })
+    # First → get distinct upload_ids for this user in this project
+    upload_ids = file_analysis_collection.distinct(
+        "upload_id", {"project_id": project_id, "user_id": user_id}
+    )
+
     uploads = []
-    for upload in uploads_cursor:
-        uploads.append({
-            "upload_id": upload.get("upload_id"),
-            "file": upload.get("file"),
-            "original_filename": upload.get("original_filename"),
-            "bugs_original": upload.get("bugs_original"),
-            "bugs_sanity_checked": upload.get("bugs_sanity_checked"),
-            "optimizations_original": upload.get("optimizations_original"),
-            "optimizations_sanity_checked": upload.get("optimizations_sanity_checked"),
-            "timestamp": upload.get("timestamp")
+    for upload_id in upload_ids:
+        # First try with project_id + user_id
+        all_docs_cursor = file_analysis_collection.find({
+            "project_id": project_id,
+            "upload_id": upload_id,
+            "user_id": user_id
         })
 
-    return {
-        "project_id": user_data["project_id"],
-        "user_id": user_data["user_id"],
-        "uploads": uploads
+        files_data = []
+        first_doc = None
+        for doc in all_docs_cursor:
+            if first_doc is None:
+                first_doc = doc
+
+            files_data.append(doc)
+
+        # Fallback if no docs found
+        if first_doc is None:
+            print("[DEBUG] MyUploads fallback → trying without project_id")
+            all_docs_cursor = file_analysis_collection.find({
+                "upload_id": upload_id,
+                "user_id": user_id
+            })
+
+            for doc in all_docs_cursor:
+                if first_doc is None:
+                    first_doc = doc
+                files_data.append(doc)
+
+        if first_doc is None:
+            continue  # skip this upload_id if no docs found at all
+
+        # Aggregate bugs
+        bugs_sanity_checked = []
+        for doc in files_data:
+            bugs_sanity_checked.extend(doc.get("bugs_sanity_checked", []))
+
+        # Build upload entry
+        uploads.append({
+            "upload_id": upload_id,
+            "upload_description": first_doc.get("upload_description"),
+            "original_filename": first_doc.get("original_filename"),
+            "user_id": str(first_doc.get("user_id")),
+            "username": first_doc.get("username"),
+            "timestamp": first_doc.get("timestamp"),
+            "num_files": len(files_data),
+            "bugs_sanity_checked": bugs_sanity_checked
+        })
+
+    # Sort by timestamp descending
+    uploads.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    return {"project_id": str(user_data["project_id"]), "uploads": uploads}
+
+
+
+@router.get("/upload/{upload_id}")
+def upload_details(upload_id: str, user_data: dict = Depends(get_current_user_data)):
+    project_id = ObjectId(user_data["project_id"])
+
+    # First → try with project_id filter (normal case)
+    all_docs_cursor = file_analysis_collection.find({
+        "project_id": project_id,
+        "upload_id": upload_id
+    })
+
+    files_data = []
+    first_doc = None
+    for doc in all_docs_cursor:
+        if first_doc is None:
+            first_doc = doc
+
+        files_data.append({
+            "file": doc.get("file"),
+            "original_filename": doc.get("original_filename"),
+            "bugs_original": doc.get("bugs_original", []),
+            "bugs_sanity_checked": doc.get("bugs_sanity_checked", []),
+            "optimizations_original": doc.get("optimizations_original", []),
+            "optimizations_sanity_checked": doc.get("optimizations_sanity_checked", [])
+        })
+
+    # If no documents found → fallback → try without project_id (for old data)
+    if first_doc is None:
+        print("[DEBUG] No docs found with project_id → retrying without project_id")
+        all_docs_cursor = file_analysis_collection.find({
+            "upload_id": upload_id
+        })
+
+        for doc in all_docs_cursor:
+            if first_doc is None:
+                first_doc = doc
+
+            files_data.append({
+                "file": doc.get("file"),
+                "original_filename": doc.get("original_filename"),
+                "bugs_original": doc.get("bugs_original", []),
+                "bugs_sanity_checked": doc.get("bugs_sanity_checked", []),
+                "optimizations_original": doc.get("optimizations_original", []),
+                "optimizations_sanity_checked": doc.get("optimizations_sanity_checked", [])
+            })
+
+    if first_doc is None:
+        return {"error": "Upload not found"}, 404
+
+    # Build full upload details response
+    response = {
+        "upload_id": upload_id,
+        "upload_description": first_doc.get("upload_description"),
+        "username": first_doc.get("username"),
+        "user_id": str(first_doc.get("user_id")),
+        "timestamp": first_doc.get("timestamp"),
+        "num_files": len(files_data),
+        "files": files_data
     }
+
+    return response
