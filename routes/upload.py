@@ -143,7 +143,7 @@ async def upload_project(
             connected_groups_full_paths.append(group_full_paths)
         await send_progress(upload_id, f"Connected Groups ready — {len(connected_groups_full_paths)} groups", progress=15)
 
-        # ✅ Pass user_id, username, project_id, upload_description — required for correct save
+        #  Pass user_id, username, project_id, upload_description — required for correct save
         asyncio.create_task(run_analysis_task(
             upload_id,
             connected_groups_full_paths,

@@ -32,10 +32,10 @@ def get_me(user_data: dict = Depends(get_current_user_data)):
 
     return {
         "username": user["username"],
-        "project_name": project["project_name"]
+        "project_name": project["project_name"],
+        "role": user.get("role", "developer")  # ✅ include role with fallback
     }
 
-# === PUT /me ===
 
 @router.put("/me")
 def update_me(data: UpdateMeRequest, user_data: dict = Depends(get_current_user_data)):

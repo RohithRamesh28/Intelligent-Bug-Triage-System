@@ -2,28 +2,37 @@ import zipfile
 import os
 from utils.constants import JUNK_FOLDERS, MAX_PATH_LENGTH
 
+
+MAX_PATH_LENGTH = 240  # already defined
+
 def extract_zip(zip_path, extract_to):
+    extracted_files = []
+
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         for member in zip_ref.infolist():
-            # Skip too long paths → avoid Windows path error
-            if len(member.filename) > MAX_PATH_LENGTH:
+            # ✅ Skip if the full extraction path would be too long
+            full_path = os.path.join(extract_to, member.filename)
+            if len(full_path) > MAX_PATH_LENGTH:
+                print(f"[SKIPPED] Path too long: {member.filename}")
                 continue
-            
-            # Skip known junk folders
-            if any(junk_folder in member.filename for junk_folder in JUNK_FOLDERS):
+
+            # Skip junk, folders, dirs (already present)
+            if any(junk in member.filename for junk in JUNK_FOLDERS):
                 continue
-            
-            # Skip directory entries
             if member.is_dir():
                 continue
-            
-            # Safe extract → create needed folders first
-            target_path = os.path.join(extract_to, member.filename)
-            target_dir = os.path.dirname(target_path)
+
+            # Safe extract
+            target_dir = os.path.dirname(full_path)
             os.makedirs(target_dir, exist_ok=True)
 
-            with zip_ref.open(member) as source, open(target_path, "wb") as target:
+            with zip_ref.open(member) as source, open(full_path, "wb") as target:
                 target.write(source.read())
+
+            extracted_files.append(member.filename)
+
+    return extracted_files
+
 
 def is_code_file(filepath):
     CODE_EXTENSIONS = [

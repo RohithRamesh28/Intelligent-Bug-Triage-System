@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Register your routes
+#Register your routes
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(progress_ws.router, tags=["WebSocket"])
 app.include_router(file_bugs.router, tags=["File Bugs"])
@@ -33,7 +33,7 @@ app.include_router(project.router, tags=["Project"])
 app.include_router(me.router, tags=["Me"])
 
 
-# ✅ Optional root route — for testing
+#root route — for testing
 @app.get("/")
 async def root():
-    return {"message":"Welcome to Intelligent Bug Triage System API 🚀"}
+    return {"message":"Welcome to Intelligent Bug Triage System API "}

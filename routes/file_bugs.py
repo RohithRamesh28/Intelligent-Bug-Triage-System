@@ -34,30 +34,25 @@ async def get_all_file_bugs(upload_id: str):
     results = []
 
     for doc in docs:
-        # Extract original filename — show this in UI
         original_name = doc.get("original_filename", "(unknown)")
-        
-        # If you want to also show path, you can split `file`, but here it's optional
-        full_file_path = doc.get("file", "")
-        file_path, _ = os.path.split(full_file_path)
+        file_path = doc.get("file", "")
+        zip_name = doc.get("zip_name", "")  # ✅ Add this line
+        bugs = doc.get("bugs_sanity_checked", [])
 
-        print(f"[DEBUG] Processing file: {original_name} (stored path: {full_file_path})")
+        results.append({
+            "file_path": file_path,
+            "file_name": original_name,
+            "zip_name": zip_name,              # ✅ Include in response
+            "bugs": bugs
+        })  
 
-        for bug in doc.get("bugs_sanity_checked", []):
-            results.append({
-                "file_path": file_path,  # optional — can leave "" if not needed
-                "file_name": original_name,  # show real uploaded filename
-                "line": bug.get("line"),
-                "description": bug.get("description"),
-                "priority": bug.get("priority", "Unknown"),
-            })
+        print(f"[DEBUG] {file_path} from {original_name} → {len(bugs)} bug(s)")
 
     if not results:
-        print(f"[GET /file_bugs/{upload_id}] → No bugs found")
+        print(f"[GET /file_bugs/{upload_id}] → No files found ❌")
     else:
-        print(f"[GET /file_bugs/{upload_id}] → {len(results)} bugs found ✅")
+        print(f"[GET /file_bugs/{upload_id}] → {len(results)} file(s) ✅")
 
-    return { "bugs": results }
-
+    return results
 
 

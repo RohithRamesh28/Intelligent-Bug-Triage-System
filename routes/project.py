@@ -7,7 +7,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from utils.auth_utils import get_current_user_data
 from bson import ObjectId
 from db.models import file_analysis_collection
-
+import os
+from db.models import users_collection
 
 router = APIRouter()
 
@@ -79,6 +80,9 @@ def project_dashboard(user_data: dict = Depends(get_current_user_data)):
         for doc in all_docs:
             bugs_sanity_checked.extend(doc.get("bugs_sanity_checked", []))
 
+        # Collect file names
+        file_names = [os.path.basename(doc.get("file", "")) for doc in file_analysis_collection.find({"upload_id": upload_id})]
+
         uploads.append({
             "upload_id": upload_id,
             "upload_description": first_doc.get("upload_description"),
@@ -87,7 +91,8 @@ def project_dashboard(user_data: dict = Depends(get_current_user_data)):
             "username": first_doc.get("username"),
             "timestamp": first_doc.get("timestamp"),
             "num_files": num_files,
-            "bugs_sanity_checked": bugs_sanity_checked  # now full list of bugs
+            "file_names": file_names,  
+            "bugs_sanity_checked": bugs_sanity_checked
         })
 
     # Sort uploads by timestamp descending
@@ -98,7 +103,26 @@ def project_dashboard(user_data: dict = Depends(get_current_user_data)):
 
 
 
-# === Personal Upload History ===
+
+@router.get("/project/user-stats")
+def user_stats(user_data: dict = Depends(get_current_user_data)):
+    project_id = ObjectId(user_data["project_id"])
+
+    users = users_collection.find({"project_id": project_id})
+    developers = 0
+    team_leads = 0
+
+    for user in users:
+        role = user.get("role", "developer")
+        if role == "team_lead":
+            team_leads += 1
+        else:
+            developers += 1
+
+    return {
+        "developers": developers,
+        "team_leads": team_leads
+    }
 
 @router.get("/project/my-uploads")
 def my_uploads(user_data: dict = Depends(get_current_user_data)):
@@ -150,16 +174,16 @@ def my_uploads(user_data: dict = Depends(get_current_user_data)):
 
         # Build upload entry
         uploads.append({
-            "upload_id": upload_id,
-            "upload_description": first_doc.get("upload_description"),
-            "original_filename": first_doc.get("original_filename"),
-            "user_id": str(first_doc.get("user_id")),
-            "username": first_doc.get("username"),
-            "timestamp": first_doc.get("timestamp"),
-            "num_files": len(files_data),
-            "bugs_sanity_checked": bugs_sanity_checked
-        })
-
+    "upload_id": upload_id,
+    "upload_description": first_doc.get("upload_description"),
+    "original_filename": first_doc.get("original_filename"),
+    "user_id": str(first_doc.get("user_id")),
+    "username": first_doc.get("username"),
+    "timestamp": first_doc.get("timestamp"),
+    "num_files": len(files_data),
+    "file_names": [os.path.basename(doc.get("file", "")) for doc in files_data],
+    "bugs_sanity_checked": bugs_sanity_checked
+})
     # Sort by timestamp descending
     uploads.sort(key=lambda x: x["timestamp"], reverse=True)
 
@@ -227,3 +251,24 @@ def upload_details(upload_id: str, user_data: dict = Depends(get_current_user_da
     }
 
     return response
+# === GET /project/{project_id} ===
+
+@router.get("/project/{project_id}")
+def get_project_by_id(project_id: str):
+    try:
+        project = projects_collection.find_one({"_id": ObjectId(project_id)})
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        return {
+            "project_id": str(project["_id"]),
+            "project_name": project.get("project_name", "Unnamed Project"),
+            "created_at": project.get("created_at"),
+            "creator_user_id": str(project.get("creator_user_id")) if project.get("creator_user_id") else None,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+

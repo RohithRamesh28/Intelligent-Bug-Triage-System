@@ -14,7 +14,8 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     username: str
     password: str
-    project_id: str  # Now we take project_id (not project_name)
+    project_id: str
+    role: str  # 👈 Add this
 
 class LoginRequest(BaseModel):
     username: str
@@ -44,11 +45,13 @@ def register_user(data: RegisterRequest):
     # Create new User
     password_hash = hash_password(password)
     user_doc = {
-        "username": username,
-        "password_hash": password_hash,
-        "project_id": ObjectId(project_id),
-        "created_at": datetime.now(timezone.utc)
+    "username": username,
+    "password_hash": password_hash,
+    "project_id": ObjectId(project_id),
+    "role": data.role,  # 👈 Store the role
+    "created_at": datetime.now(timezone.utc)
     }
+
     user_id = users_collection.insert_one(user_doc).inserted_id
 
     # If project creator was None → update it now
@@ -70,7 +73,7 @@ def login_user(data: LoginRequest):
     username = data.username
     password = data.password
 
-    # Find user
+    # Find user by username
     user = users_collection.find_one({"username": username})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
@@ -79,11 +82,24 @@ def login_user(data: LoginRequest):
     if not verify_password(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
+    # Extract project_id and user_id
     project_id = user["project_id"]
     user_id = user["_id"]
+    
+    # Extract role (default to developer if missing)
+    role = user.get("role", "developer")
 
-    # Create JWT token
-    token = create_jwt_token(str(user_id), str(project_id), user["username"])
+    # Create JWT token including the role
+    token = create_jwt_token(
+        user_id=str(user_id),
+        project_id=str(project_id),
+        username=user["username"],
+        role=role
+    )
 
-
-    return {"token": token, "user_id": str(user_id), "project_id": str(project_id)}
+    return {
+        "token": token,
+        "user_id": str(user_id),
+        "project_id": str(project_id),
+        "role": role
+    }

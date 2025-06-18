@@ -23,13 +23,13 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 # === JWT Token handling ===
 
-def create_jwt_token(user_id: str, project_id: str ,username: str) -> str:
+def create_jwt_token(user_id: str, project_id: str, username: str, role: str) -> str:
     payload = {
         "user_id": user_id,
         "project_id": project_id,
         "username": username,
+        "role": role,  # 👈 Add role to JWT
         "exp": datetime.utcnow() + timedelta(minutes=JWT_EXP_DELTA_MINUTES)
-        
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token
@@ -53,7 +53,8 @@ def get_current_user_data(credentials: HTTPAuthorizationCredentials = Security(b
         return {
             "user_id": payload["user_id"],
             "project_id": payload["project_id"],
-            "username": payload.get("username", "Unknown")
+            "username": payload.get("username", "Unknown"),
+            "role": payload.get("role", "developer")  # 👈 Add role to user data
         }
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

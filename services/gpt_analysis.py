@@ -147,7 +147,7 @@ Please return the corrected list, as valid JSON only.
 
 
 
-# 3️⃣ GPT call wrapper for single file analysis
+# 3️ GPT call wrapper for single file analysis
 async def call_gpt_async(code_chunk, file_path):
     code_chunk_safe = code_chunk.replace("{", "{{").replace("}", "}}")
 
