@@ -1,19 +1,19 @@
 # utils/auth_utils.py
 
+from datetime import datetime, timedelta, timezone
 from passlib.hash import bcrypt
 import jwt
-from datetime import datetime, timedelta
-from fastapi import Depends, HTTPException, Header
-from fastapi.security import HTTPBearer
-from fastapi import Security, HTTPException
+import os
+from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+load_dotenv()
 
-# Secret key for JWT (you can load from .env if you want)
-JWT_SECRET = "supersecretjwtkey"  # change this in production!
+
+JWT_SECRET = os.getenv("JWT_SECRET", "fallback_secret")  
 JWT_ALGORITHM = "HS256"
-JWT_EXP_DELTA_MINUTES = 60 * 24  # 1 day
+JWT_EXP_DELTA_MINUTES = 60 * 24  
 
-# === Password hashing ===
 
 def hash_password(password: str) -> str:
     return bcrypt.hash(password)
@@ -21,15 +21,14 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.verify(password, password_hash)
 
-# === JWT Token handling ===
 
 def create_jwt_token(user_id: str, project_id: str, username: str, role: str) -> str:
     payload = {
         "user_id": user_id,
         "project_id": project_id,
         "username": username,
-        "role": role,  # 👈 Add role to JWT
-        "exp": datetime.utcnow() + timedelta(minutes=JWT_EXP_DELTA_MINUTES)
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXP_DELTA_MINUTES)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token
@@ -54,7 +53,7 @@ def get_current_user_data(credentials: HTTPAuthorizationCredentials = Security(b
             "user_id": payload["user_id"],
             "project_id": payload["project_id"],
             "username": payload.get("username", "Unknown"),
-            "role": payload.get("role", "developer")  # 👈 Add role to user data
+            "role": payload.get("role", "developer")
         }
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

@@ -1,4 +1,4 @@
-# db/models.py
+
 
 from bson import ObjectId
 from .mongo_client import client
@@ -7,16 +7,15 @@ from datetime import datetime, timezone
 
 db = client["bug_triage_db"]
 
-# === Collections ===
 
 users_collection = db["users"]
 projects_collection = db["projects"]
 file_analysis_collection = db["file_analysis"]
 
-# === Indexes ===
+
 
 users_collection.create_index(
-    [("username", ASCENDING), ("project_id", ASCENDING)],
+    [("username", ASCENDING), ("project_id", ASCENDING), ("role", ASCENDING)],
     unique=True
 )
 
@@ -25,7 +24,6 @@ projects_collection.create_index(
     unique=True
 )
 
-# === Save Upload function ===
 
 def save_to_mongo(upload_id, file_name, parsed_data, user_id, username, project_id, original_name=None, upload_description=""):
 
@@ -38,9 +36,9 @@ def save_to_mongo(upload_id, file_name, parsed_data, user_id, username, project_
         "optimizations_original": parsed_data["optimizations_original"],
         "optimizations_sanity_checked": parsed_data["optimizations_sanity_checked"],
         "user_id": ObjectId(user_id),
-        "username": username,  # NEW
+        "username": username,  
         "project_id": ObjectId(project_id),
-        "upload_description": upload_description,  # NEW
+        "upload_description": upload_description,  
         "timestamp": datetime.now(timezone.utc)
     }
 

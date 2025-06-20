@@ -1,5 +1,3 @@
-# routes/auth.py
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from db.models import users_collection, projects_collection
@@ -9,52 +7,51 @@ from datetime import datetime, timezone
 
 router = APIRouter()
 
-# === Pydantic models ===
+
 
 class RegisterRequest(BaseModel):
     username: str
     password: str
     project_id: str
-    role: str  # 👈 Add this
+    role: str
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+    project_id: str
+    role: str
 
-# === Register endpoint ===
 
 @router.post("/register")
 def register_user(data: RegisterRequest):
-    username = data.username
+    username = data.username.strip().lower()
     password = data.password
     project_id = data.project_id
+    role = data.role
 
-    # Validate project_id exists
     project = projects_collection.find_one({"_id": ObjectId(project_id)})
     if not project:
         raise HTTPException(status_code=400, detail="Invalid project_id. Project not found.")
 
-    # Check if username already exists in this project
     existing_user = users_collection.find_one({
         "username": username,
-        "project_id": ObjectId(project_id)
+        "project_id": ObjectId(project_id),
+        "role": role
     })
     if existing_user:
-        raise HTTPException(status_code=400, detail="Username already exists in this Project.")
+        raise HTTPException(status_code=400, detail="Username already exists for this role in this project.")
 
-    # Create new User
     password_hash = hash_password(password)
     user_doc = {
-    "username": username,
-    "password_hash": password_hash,
-    "project_id": ObjectId(project_id),
-    "role": data.role,  # 👈 Store the role
-    "created_at": datetime.now(timezone.utc)
+        "username": username,
+        "password_hash": password_hash,
+        "project_id": ObjectId(project_id),
+        "role": role,
+        "created_at": datetime.now(timezone.utc)
     }
 
     user_id = users_collection.insert_one(user_doc).inserted_id
 
-    # If project creator was None → update it now
     if project.get("creator_user_id") is None:
         projects_collection.update_one(
             {"_id": ObjectId(project_id)},
@@ -66,40 +63,39 @@ def register_user(data: RegisterRequest):
         "user_id": str(user_id),
         "project_id": str(project_id)
     }
-# === Login endpoint ===
+
+
 
 @router.post("/login")
 def login_user(data: LoginRequest):
-    username = data.username
+    username = data.username.strip().lower()
     password = data.password
+    project_id = data.project_id
+    role = data.role
 
-    # Find user by username
-    user = users_collection.find_one({"username": username})
+    user = users_collection.find_one({
+        "username": username,
+        "project_id": ObjectId(project_id),
+        "role": role
+    })
+
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise HTTPException(status_code=404, detail="User not found with this role and project.")
 
-    # Verify password
     if not verify_password(password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
+        raise HTTPException(status_code=401, detail="Incorrect password.")
 
-    # Extract project_id and user_id
-    project_id = user["project_id"]
-    user_id = user["_id"]
-    
-    # Extract role (default to developer if missing)
-    role = user.get("role", "developer")
-
-    # Create JWT token including the role
     token = create_jwt_token(
-        user_id=str(user_id),
+        user_id=str(user["_id"]),
         project_id=str(project_id),
-        username=user["username"],
+        username=username,
         role=role
     )
 
     return {
         "token": token,
-        "user_id": str(user_id),
+        "user_id": str(user["_id"]),
         "project_id": str(project_id),
-        "role": role
+        "role": role,
+        "username": username 
     }

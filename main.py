@@ -1,4 +1,3 @@
-# main.py
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 from routes import upload, progress_ws, file_bugs
@@ -15,16 +14,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ✅ Enable CORS middleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # allow frontend
+    allow_origins=["http://localhost:5173"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-#Register your routes
+
 app.include_router(upload.router, prefix="/upload", tags=["Upload"])
 app.include_router(progress_ws.router, tags=["WebSocket"])
 app.include_router(file_bugs.router, tags=["File Bugs"])
@@ -33,7 +32,7 @@ app.include_router(project.router, tags=["Project"])
 app.include_router(me.router, tags=["Me"])
 
 
-#root route — for testing
+
 @app.get("/")
 async def root():
     return {"message":"Welcome to Intelligent Bug Triage System API "}

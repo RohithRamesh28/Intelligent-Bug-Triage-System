@@ -36,11 +36,11 @@ async def send_progress(upload_id: str, message: str, progress: int = None):
         except:
             disconnected_clients.append(ws)
     
-    # Cleanup disconnected
+
     for ws in disconnected_clients:
         connected_websockets[upload_id].remove(ws)
     
-    # If no clients left, clean up
+
     if len(connected_websockets[upload_id]) == 0:
         del connected_websockets[upload_id]
 
@@ -48,17 +48,16 @@ async def send_progress(upload_id: str, message: str, progress: int = None):
 @router.post("/")
 async def upload_project(
     request: Request,
-    upload_description: str = Form(""),  # NEW → take from frontend
+    upload_description: str = Form(""),  
     files: list[UploadFile] = File(...),
     user_data: dict = Depends(get_current_user_data)
 ):
     try:
-        # ✅ Now safe — requires token!
+       
         user_id = user_data["user_id"]
         project_id = user_data["project_id"]
-        username = user_data["username"]  # NEW → get username for Mongo
-
-        # === Main logic ===
+        username = user_data["username"] 
+        #Main logic
         os.makedirs(TEMP_FOLDER, exist_ok=True)
         upload_id = str(uuid.uuid4())
         all_code_files = []
@@ -120,7 +119,7 @@ async def upload_project(
                         "preview": preview_text
                     })
 
-        await send_progress(upload_id, "Upload complete ✅", progress=5)
+        await send_progress(upload_id, "Upload complete ", progress=5)
         await send_progress(upload_id, "Running Project Summary...", progress=10)
 
         summary_text = await get_project_summary(file_previews)
@@ -143,7 +142,7 @@ async def upload_project(
             connected_groups_full_paths.append(group_full_paths)
         await send_progress(upload_id, f"Connected Groups ready — {len(connected_groups_full_paths)} groups", progress=15)
 
-        #  Pass user_id, username, project_id, upload_description — required for correct save
+
         asyncio.create_task(run_analysis_task(
             upload_id,
             connected_groups_full_paths,
@@ -170,7 +169,7 @@ async def run_analysis_task(upload_id, connected_groups, extract_paths, file_pre
         gpt_results = []
         tasks = []
 
-        # Build full_path_to_original_name mapping once
+      
         full_path_to_original_name = {
             file_obj["filename"]: file_obj.get("original_name", "")
             for file_obj in file_previews
@@ -194,7 +193,7 @@ async def run_analysis_task(upload_id, connected_groups, extract_paths, file_pre
 
         await asyncio.gather(*tasks)
 
-        # Clean up extracted files
+        
         for path in extract_paths:
             if os.path.isdir(path):
                 shutil.rmtree(path)
@@ -225,7 +224,7 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
 
             total_lines = len(file_lines)
 
-            # Dynamically adjust chunk size
+            
             if total_lines <= 300:
                 MAX_LINES_PER_CHUNK = total_lines
             elif total_lines <= 2000:
@@ -241,12 +240,12 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
                 chunk_lines = file_lines[start_line:end_line]
                 file_chunks.append((file_name, chunk_lines))
 
-        # Run GPT analysis
+       
         analysis_output = await call_gpt_analyze_chunk(file_chunks)
 
-        # Parse analysis_output as JSON (safe way)
+        
         try:
-            # Clean up possible GPT wrapping:
+            
             if analysis_output.strip().startswith("```json"):
                 analysis_output = analysis_output.strip().split("```json")[1].split("```")[0].strip()
             elif analysis_output.strip().startswith("```"):
@@ -257,14 +256,14 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             print(f"[Parse Error] Could not parse GPT analysis output JSON: {e}")
             analysis_data = { "bugs": [], "optimizations": [] }
 
-        # Build bug_list_text for sanity check
+        
         bugs_json_string = json.dumps(analysis_data.get("bugs", []), indent=2)
 
         await send_progress(upload_id, f"Running Sanity Check on Group {group_index + 1}/{total_groups}...", progress=group_progress + 5)
 
         sanity_checked_output = await run_sanity_check_on_bugs(group[0], bugs_json_string)
 
-        # Sanity check parse
+        
         try:
             if sanity_checked_output.strip().startswith("```json"):
                 sanity_checked_output = sanity_checked_output.strip().split("```json")[1].split("```")[0].strip()
@@ -276,7 +275,6 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             print(f"[Parse Error] Could not parse Sanity Check output JSON: {e}")
             sanity_checked_data = { "bugs": [] }
 
-        # Store results
         gpt_results.append({
             "files": group,
             "analysis_output": analysis_data,

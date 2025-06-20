@@ -7,11 +7,10 @@ import json
 from dotenv import load_dotenv
 load_dotenv()
 
-# Create OpenAI client (new API style)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def get_project_summary(file_previews):
-    # Build project file list with previews as text → USE display_name
+    
     project_file_list = ""
     for file_obj in file_previews:
         project_file_list += f"\nFilename: {file_obj['display_name']}\nPreview:\n{file_obj['preview']}\n{'-'*40}\n"
@@ -64,7 +63,7 @@ Please generate the Connected Groups in the format described above.
 
 def parse_project_summary(summary_text):
     try:
-        # Clean GPT response → remove ```json if present
+  
         clean_text = summary_text.strip()
         if clean_text.startswith("```json"):
             clean_text = clean_text[7:].strip()
@@ -79,6 +78,6 @@ def parse_project_summary(summary_text):
         print(f"[Parse Error] Could not parse Project Summary JSON: {e}")
         connected_groups = []
 
-    dependencies = {}  # Not used anymore
+    dependencies = {} 
 
     return dependencies, connected_groups

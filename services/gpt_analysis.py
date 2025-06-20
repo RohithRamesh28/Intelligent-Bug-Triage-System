@@ -7,7 +7,6 @@ load_dotenv()
 
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 1️⃣ GPT call wrapper for multi-file chunk
 async def call_gpt_analyze_chunk(file_chunks):
     chunk_message_parts = []
 
@@ -70,10 +69,6 @@ Now here are the files:
 
     return content
 
-# 2️⃣ Sanity check
-# 2️⃣ Sanity check → fixed to return JSON
-
-
 
 
 async def run_sanity_check_on_bugs(file_name, bug_list_text_json):
@@ -133,7 +128,7 @@ Please return the corrected list, as valid JSON only.
 
     content = response.choices[0].message.content
 
-    # 🛠️ Clean possible junk / code block markers from GPT response
+
     if content.strip().startswith("```json"):
         content = content.strip().split("```json")[1].split("```")[0].strip()
     elif content.strip().startswith("```"):
@@ -147,7 +142,7 @@ Please return the corrected list, as valid JSON only.
 
 
 
-# 3️ GPT call wrapper for single file analysis
+
 async def call_gpt_async(code_chunk, file_path):
     code_chunk_safe = code_chunk.replace("{", "{{").replace("}", "}}")
 
@@ -192,13 +187,13 @@ Here is the file content:
 
     return content
 
-# 4️⃣ Analyze single file async
+
 async def analyze_file_async(file_path):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             code = f.read()
 
-        # For now, treat entire file as one chunk
+    
         analysis_content = await call_gpt_async(code, file_path)
 
         return {

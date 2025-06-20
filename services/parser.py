@@ -12,7 +12,7 @@ def parse_outputs(analysis_output, sanity_checked_output=None):
             clean_text = clean_text[:-3].strip()
         return clean_text
 
-    # Parse analysis_output (may be dict or string)
+    
     try:
         if isinstance(analysis_output, dict):
             parsed_json = analysis_output
@@ -23,7 +23,7 @@ def parse_outputs(analysis_output, sanity_checked_output=None):
         print(f"[Parse Error] Could not parse GPT analysis output JSON: {e}")
         parsed_json = { "bugs": [], "optimizations": [] }
 
-    # Parse sanity_checked_output (may be dict or string)
+    
     sanity_json = { "bugs": [] }
     if sanity_checked_output:
         try:
