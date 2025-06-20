@@ -1,41 +1,65 @@
-aiohappyeyeballs==2.6.1
-aiohttp==3.12.11
-aiosignal==1.3.2
-annotated-types==0.7.0
-anyio==4.9.0
-async-timeout==5.0.1
-attrs==25.3.0
-certifi==2025.4.26
-charset-normalizer==3.4.2
-click==8.1.8
-colorama==0.4.6
-distro==1.9.0
-dnspython==2.7.0
-exceptiongroup==1.3.0
-fastapi==0.115.12
-frozenlist==1.6.2
-h11==0.16.0
-httpcore==1.0.9
-httpx==0.28.1
-idna==3.10
-jiter==0.10.0
-motor==3.7.1
-multidict==6.4.4
-openai==1.84.0
-propcache==0.3.1
-pydantic==2.11.5
-pydantic_core==2.33.2
-pymongo==4.13.0
-python-dotenv==1.1.0
-python-multipart==0.0.20
-requests==2.32.3
-sniffio==1.3.1
-starlette==0.46.2
-tqdm==4.67.1
-typing-inspection==0.4.1
-typing_extensions==4.14.0
-urllib3==2.4.0
-uvicorn==0.34.3
-watchfiles==1.0.5
-websockets==11.0.3
-yarl==1.20.0
+# Core Framework
+fastapi==0.115.12             # Fast modern web framework for building APIs with Python 3.7+
+starlette==0.46.2             # ASGI toolkit used under the hood by FastAPI
+uvicorn==0.34.3               # ASGI server for running FastAPI apps
+
+# Data Validation & Schema
+pydantic==2.11.5              # Data validation using Python type hints
+pydantic_core==2.33.2         # Core validation engine behind Pydantic
+annotated-types==0.7.0        # Enables annotations like Annotated[X, Constraint]
+
+# Authentication & Security
+passlib==1.7.4                # Password hashing utilities (e.g., bcrypt, pbkdf2)
+bcrypt==3.2.2                 # Password hashing algorithm used with Passlib
+PyJWT==2.10.1                 # JWT (JSON Web Token) encoding/decoding
+
+# Web/Network & HTTP
+aiohttp==3.12.11              # Async HTTP client/server (used by OpenAI or custom HTTP)
+httpx==0.28.1                 # Advanced HTTP client for async/requests-like syntax
+requests==2.32.3              # Popular synchronous HTTP client
+urllib3==2.4.0                # Low-level HTTP library used by requests
+idna==3.10                    # International domain name support
+charset-normalizer==3.4.2     # Text encoding detection used in requests
+certifi==2025.4.26            # SSL certificate authority bundle for requests
+
+# ASGI / WebSocket Support
+websockets==11.0.3            # WebSocket server and client for async apps
+watchfiles==1.0.5             # Reload server on file changes (like live-reload in dev)
+h11==0.16.0                   # HTTP/1.1 support used by uvicorn/httpx
+
+#  Async Utilities
+anyio==4.9.0                  # Async I/O with support for asyncio and trio
+sniffio==1.3.1                # Detect which async library is running
+async-timeout==5.0.1          # Timeout support for async calls
+aiosignal==1.3.2              # Signal dispatching for asyncio apps
+frozenlist==1.6.2             # Immutable list implementation used in aiohttp
+aiohappyeyeballs==2.6.1       # Fast DNS/connection attempts (used in aiohttp)
+multidict==6.4.4              # Dictionary with multiple values per key (used in aiohttp)
+yarl==1.20.0                  # URL parsing for aiohttp
+
+# OpenAI / GPT Support
+openai==1.84.0                # Official OpenAI SDK to use GPT models
+
+# MongoDB & Database
+motor==3.7.1                  # Async MongoDB driver built on top of pymongo
+pymongo==4.13.0               # Core MongoDB driver
+dnspython==2.7.0              # DNS resolver for SRV records (used in MongoDB URIs)
+
+# Multipart / Forms
+python-multipart==0.0.20      # Handle file uploads in FastAPI
+
+# Environment Config
+python-dotenv==1.1.0          # Load environment variables from .env files
+
+# Support Libraries
+typing_extensions==4.14.0     # For backward-compatible typing features
+typing-inspection==0.4.1      # Used for inspecting typing info (e.g. Annotated)
+attrs==25.3.0                 # Boilerplate reduction for class declarations
+exceptiongroup==1.3.0         # Used to handle multiple exceptions in asyncio
+click==8.1.8                  # CLI support, used in uvicorn/tqdm
+colorama==0.4.6               # Colored terminal output
+cffi==1.17.1                  # C Foreign Function Interface for Python
+pycparser==2.22               # Parses C declarations for cffi
+
+# Dev/Utils
+distro==1.
