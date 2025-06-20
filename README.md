@@ -1,5 +1,8 @@
 # 🐞 Intelligent Bug Triage System – Backend
 
+THe frontend repo for this back - https://github.com/RohithRamesh28/Intelligent-Bug-Triage-System-frontend.git
+
+
 This is the backend of the **Intelligent Bug Triage System**, designed to analyze uploaded projects (single files or zipped codebases), detect bugs and risky code patterns using static analysis and GPT-4o, and store results in MongoDB.
 
 ## 🚀 Features
