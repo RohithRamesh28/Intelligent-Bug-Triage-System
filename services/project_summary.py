@@ -1,56 +1,41 @@
+# services/project_summary.py
+
 import openai
 import os
 import asyncio
+import json
 from dotenv import load_dotenv
 load_dotenv()
 
-
-# Create OpenAI client (new API style)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def get_project_summary(file_previews):
-    # Build project file list with previews as text
+    
     project_file_list = ""
     for file_obj in file_previews:
-        project_file_list += f"\nFilename: {file_obj['filename']}\nPreview:\n{file_obj['preview']}\n{'-'*40}\n"
+        project_file_list += f"\nFilename: {file_obj['display_name']}\nPreview:\n{file_obj['preview']}\n{'-'*40}\n"
+
+    print(f"[DEBUG] Project Summary prompt length: {len(project_file_list)} chars")
 
     messages = [
         {"role": "system", "content": "You are an expert software architect."},
         {"role": "user", "content": f"""
 You are given a list of files in a software project.
 For each file, you are provided:
-- the full filename (including path)
-- a preview of the file content (first 500 characters), which may include imports, top-level functions, and classes.
+- the filename (relative path)
+- a preview of the file content (first 500 characters).
 
 Your goal is to analyze this information and group the files logically into connected groups.
-A connected group represents files that work together as part of the same component or feature.
 
-Files can belong to:
-- Services
-- API Routes
-- Utilities
-- Core logic
-- Configuration
-- Tests
-- Other relevant categories
-
-Use the filename path and preview content to make informed groupings.
-
-Important guidelines:
-- Do NOT attempt to fully analyze code → only use preview to help understand relationships.
-- Prioritize grouping files that import each other or work together.
-- Do not leave any file ungrouped unless it is completely standalone.
-
-Your output format must be a JSON list of groups:
+⚠️ VERY IMPORTANT:
+- You must return the output as a VALID JSON list of groups, in this format:
 
 [
     ["src/services/auth_service.py", "src/services/user_service.py"],
-    ["src/routes/auth_routes.py", "src/routes/user_routes.py"],
-    ["src/utils/data_utils.py", "src/utils/email_utils.py"],
-    ["src/main.py"]
+    ["src/routes/auth_routes.py", "src/routes/user_routes.py"]
 ]
 
-Do not include the preview in your output — only the list of filenames grouped logically.
+- Do NOT output explanations or any extra text. Only return the pure JSON.
 
 Here is the list of project files with previews:
 
@@ -70,33 +55,29 @@ Please generate the Connected Groups in the format described above.
 
     content = response.choices[0].message.content
 
+    print("\n===== GPT Project Summary Output =====")
+    print(content)
+    print("======================================\n")
+
     return content
 
 def parse_project_summary(summary_text):
-    dependencies = {}
-    connected_groups = []
+    try:
+  
+        clean_text = summary_text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:].strip()
+        if clean_text.startswith("```"):
+            clean_text = clean_text[3:].strip()
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3].strip()
 
-    lines = summary_text.splitlines()
-    current_section = None
+        connected_groups = json.loads(clean_text)
 
-    for line in lines:
-        line = line.strip()
+    except Exception as e:
+        print(f"[Parse Error] Could not parse Project Summary JSON: {e}")
+        connected_groups = []
 
-        if line.startswith("Dependencies:"):
-            current_section = "dependencies"
-            continue
-        if line.startswith("Connected Groups:"):
-            current_section = "groups"
-            continue
-
-        if current_section == "dependencies" and "→" in line:
-            file, deps = line.split("→")
-            file = file.strip()
-            deps = deps.strip().strip("[]").replace(",", "").split()
-            dependencies[file] = deps
-
-        if current_section == "groups" and line.startswith("-"):
-            group_files = line[1:].strip().strip("[]").replace(",", "").split()
-            connected_groups.append(group_files)
+    dependencies = {} 
 
     return dependencies, connected_groups
