@@ -62,4 +62,4 @@ cffi==1.17.1                  # C Foreign Function Interface for Python
 pycparser==2.22               # Parses C declarations for cffi
 
 # Dev/Utils
-distro==1.
+distro==1.9.0
