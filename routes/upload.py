@@ -224,7 +224,6 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
 
             total_lines = len(file_lines)
 
-            
             if total_lines <= 300:
                 MAX_LINES_PER_CHUNK = total_lines
             elif total_lines <= 2000:
@@ -240,12 +239,10 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
                 chunk_lines = file_lines[start_line:end_line]
                 file_chunks.append((file_name, chunk_lines))
 
-       
+        # Call GPT on the combined chunks of the group
         analysis_output = await call_gpt_analyze_chunk(file_chunks)
 
-        
         try:
-            
             if analysis_output.strip().startswith("```json"):
                 analysis_output = analysis_output.strip().split("```json")[1].split("```")[0].strip()
             elif analysis_output.strip().startswith("```"):
@@ -254,47 +251,50 @@ async def analyze_one_group(upload_id, group, group_index, total_groups, gpt_res
             analysis_data = json.loads(analysis_output)
         except Exception as e:
             print(f"[Parse Error] Could not parse GPT analysis output JSON: {e}")
-            analysis_data = { "bugs": [], "optimizations": [] }
-
-        
-        bugs_json_string = json.dumps(analysis_data.get("bugs", []), indent=2)
+            analysis_data = []
 
         await send_progress(upload_id, f"Running Sanity Check on Group {group_index + 1}/{total_groups}...", progress=group_progress + 5)
 
-        sanity_checked_output = await run_sanity_check_on_bugs(group[0], bugs_json_string)
+        # Iterate through each file's results in the group
+        for file_result in analysis_data:
+            file_path = file_result["file"]
+            bugs = file_result.get("bugs", [])
+            optimizations = file_result.get("optimizations", [])
 
-        
-        try:
-            if sanity_checked_output.strip().startswith("```json"):
-                sanity_checked_output = sanity_checked_output.strip().split("```json")[1].split("```")[0].strip()
-            elif sanity_checked_output.strip().startswith("```"):
-                sanity_checked_output = sanity_checked_output.strip().split("```")[1].split("```")[0].strip()
+            # Run sanity check on this file's bugs
+            sanity_checked = await run_sanity_check_on_bugs(file_path, json.dumps(bugs, indent=2))
 
-            sanity_checked_data = json.loads(sanity_checked_output)
-        except Exception as e:
-            print(f"[Parse Error] Could not parse Sanity Check output JSON: {e}")
-            sanity_checked_data = { "bugs": [] }
+            try:
+                if sanity_checked.strip().startswith("```json"):
+                    sanity_checked = sanity_checked.strip().split("```json")[1].split("```")[0].strip()
+                elif sanity_checked.strip().startswith("```"):
+                    sanity_checked = sanity_checked.strip().split("```")[1].split("```")[0].strip()
 
-        gpt_results.append({
-            "files": group,
-            "analysis_output": analysis_data,
-            "sanity_checked_output": sanity_checked_data
-        })
+                sanity_checked_data = json.loads(sanity_checked)
+            except Exception as e:
+                print(f"[Parse Error] Could not parse Sanity Check output JSON: {e}")
+                sanity_checked_data = { "bugs": [] }
 
-        await send_progress(upload_id, f"Saving Group {group_index + 1} to MongoDB...", progress=group_progress + 10)
+            parsed_data = parse_outputs(
+                {"bugs": bugs, "optimizations": optimizations},
+                sanity_checked_data
+            )
 
-        for file_in_group in group:
-            if isinstance(file_in_group, tuple):
-                file_name = file_in_group[0]
-            else:
-                file_name = file_in_group
+            relative_file_name = os.path.relpath(file_path, start=TEMP_FOLDER).replace("\\", "/")
+            original_name = full_path_to_original_name.get(file_path, "")
 
-            relative_file_name = os.path.relpath(file_name, start=TEMP_FOLDER).replace("\\", "/")
-            original_name = full_path_to_original_name.get(file_name, "")
+            save_to_mongo(
+                upload_id,
+                relative_file_name,
+                parsed_data,
+                user_id,
+                username,
+                project_id,
+                original_name,
+                upload_description
+            )
 
-            parsed_data = parse_outputs(analysis_data, sanity_checked_data)
-            save_to_mongo(upload_id, relative_file_name, parsed_data, user_id, username, project_id, original_name, upload_description)
-
+        await send_progress(upload_id, f"Saved Group {group_index + 1} to MongoDB", progress=group_progress + 10)
         await asyncio.sleep(0.2)
 
     except Exception as e:

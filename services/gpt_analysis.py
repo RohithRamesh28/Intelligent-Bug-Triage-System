@@ -25,29 +25,34 @@ async def call_gpt_analyze_chunk(file_chunks):
         {
             "role": "user",
             "content": f"""
-You are analyzing the following files from a software project.
-Each file is divided into clearly labeled chunks.
+You are analyzing multiple files from a software project.
+Each file is presented with its name and code chunk.
 
-For each BUG:
-- Line number (approximate is fine)
-- Priority: High / Medium / Low
-- Confidence: High / Medium / Low
-- Description
+⚠️ For EACH file, return a separate object like this:
 
-For each OPTIMIZATION:
-- Line number (or 0 / -1 if not applicable)
-- Description
-
-⚠️ Return ONLY valid JSON:
 {{
-  "bugs": [{{"line": ..., "priority": "...", "confidence": "...", "description": "..."}}],
-  "optimizations": [{{"line": ..., "description": "..."}}]
+  "file": "relative/path/to/file.js",
+  "bugs": [
+    {{"line": ..., "priority": "...", "confidence": "...", "description": "..."}}
+  ],
+  "optimizations": [
+    {{"line": ..., "description": "..."}}
+  ]
 }}
 
-If no bugs/optimizations:
-{{"bugs": [], "optimizations": []}}
+If a file has no bugs or optimizations, return empty lists for it.
+
+Final result MUST be a list of these per-file objects:
+
+[
+  {{ "file": "...", "bugs": [...], "optimizations": [...] }},
+  ...
+]
+
+No explanation, no comments — only clean JSON.
 
 Now here are the files:
+
 
 {chunk_message}
 """
